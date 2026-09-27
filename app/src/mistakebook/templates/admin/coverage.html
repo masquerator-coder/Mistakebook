@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>知识点覆盖 · 错题本后台</title>
+<link rel="stylesheet" href="/css/admin.css">
+</head>
+<body>
+<header>
+  <h1>错题本后台</h1>
+  <nav>
+    <a href="/admin">总览</a>
+    <a href="/admin/coverage" class="active">知识点覆盖</a>
+    <a href="/admin/kps">知识点核对</a>
+    <a href="/admin/ai-usage">AI 用量</a>
+    <a href="/">返回应用 →</a>
+  </nav>
+</header>
+
+<main>
+  <h2>知识点覆盖</h2>
+
+  <form method="get" class="filters">
+    <select name="subject_id" onchange="this.form.submit()">
+      {% for s in subjects %}
+      <option value="{{ s.id }}" {% if s.id == subject_id %}selected{% endif %}>{{ s.name }}</option>
+      {% endfor %}
+    </select>
+    <select name="grade" onchange="this.form.submit()">
+      <option value="" {% if not grade %}selected{% endif %}>全部年级</option>
+      {% for g in ['七上', '七下', '八上', '八下'] %}
+      <option value="{{ g }}" {% if g == grade %}selected{% endif %}>{{ g }}</option>
+      {% endfor %}
+    </select>
+    <noscript><button type="submit">查询</button></noscript>
+  </form>
+
+  {% if summary %}
+  <div class="grid">
+    <div class="card"><div class="n">{{ summary.total_kp }}</div><div class="l">知识点总数</div></div>
+    <div class="card danger"><div class="n">{{ summary.counts.weak }}</div><div class="l">有错题未掌握</div></div>
+    <div class="card ok"><div class="n">{{ summary.counts.covered }}</div><div class="l">错题已掌握</div></div>
+    <div class="card"><div class="n">{{ summary.counts.untested_with_content }}</div><div class="l">未考过（有教材）</div></div>
+    <div class="card"><div class="n">{{ summary.counts.untested }}</div><div class="l">完全没碰过</div></div>
+  </div>
+
+  <p class="warn">
+    ⚠️ 「未考过」「完全没碰过」<strong>不等于</strong>「已掌握」——
+    它们只表示还没做过这类题。
+  </p>
+
+  <table>
+    <tr>
+      <th>知识点</th><th>状态</th><th>错题</th><th>已掌握</th>
+      <th>教材页</th><th>最近复习</th>
+    </tr>
+    {% for i in summary['items'] %}
+    <tr>
+      <td>{{ i.name }}{% if not i.reviewed %} <span class="muted">（待核对）</span>{% endif %}</td>
+      <td>
+        {% if i.coverage == 'weak' %}<span class="tag danger">有错题未掌握</span>
+        {% elif i.coverage == 'covered' %}<span class="tag ok">错题已掌握</span>
+        {% elif i.coverage == 'untested_with_content' %}<span class="tag">未考过（有教材）</span>
+        {% else %}<span class="tag">完全没碰过</span>{% endif %}
+      </td>
+      <td>{{ i.mistake_cnt }}</td>
+      <td>{{ i.mastered_cnt }}</td>
+      <td>{% if i.page_from %}{{ i.page_from }}-{{ i.page_to or i.page_from }}{% else %}—{% endif %}</td>
+      <td>{{ i.last_reviewed_at.strftime('%m-%d') if i.last_reviewed_at else '—' }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p class="muted">请选择一个科目。</p>
+  {% endif %}
+</main>
+</body>
+</html>

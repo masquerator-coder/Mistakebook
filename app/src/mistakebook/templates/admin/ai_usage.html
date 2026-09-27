@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI 用量 · 错题本后台</title>
+<link rel="stylesheet" href="/css/admin.css">
+</head>
+<body>
+<header>
+  <h1>错题本后台</h1>
+  <nav>
+    <a href="/admin">总览</a>
+    <a href="/admin/coverage">知识点覆盖</a>
+    <a href="/admin/kps">知识点核对</a>
+    <a href="/admin/ai-usage" class="active">AI 用量</a>
+    <a href="/">返回应用 →</a>
+  </nav>
+</header>
+
+<main>
+  <h2>AI 用量（近 30 天，按类型）</h2>
+  {% if rows %}
+  <table>
+    <tr><th>类型</th><th>模型</th><th>调用</th><th>输入 tokens</th><th>输出 tokens</th><th>失败</th></tr>
+    {% for r in rows %}
+    <tr>
+      <td>{{ r.kind }}</td>
+      <td class="muted">{{ r.model }}</td>
+      <td>{{ r.calls }}</td>
+      <td>{{ r.tokens_in }}</td>
+      <td>{{ r.tokens_out }}</td>
+      <td>{% if r.failed %}<span class="tag danger">{{ r.failed }}</span>{% else %}0{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p class="muted">还没有调用记录。</p>
+  {% endif %}
+
+  <h2>最近 50 次调用</h2>
+  {% if recent %}
+  <table>
+    <tr><th>时间</th><th>类型</th><th>输入</th><th>输出</th><th>结果</th></tr>
+    {% for r in recent %}
+    <tr>
+      <td>{{ r.created_at.strftime('%m-%d %H:%M:%S') }}</td>
+      <td>{{ r.kind }}</td>
+      <td>{{ r.tokens_in }}</td>
+      <td>{{ r.tokens_out }}</td>
+      <td>
+        {% if r.ok %}<span class="tag ok">成功</span>
+        {% else %}<span class="tag danger" title="{{ r.error }}">失败：{{ r.error or '未知' }}</span>{% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p class="muted">还没有调用记录。</p>
+  {% endif %}
+</main>
+</body>
+</html>

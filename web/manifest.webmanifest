@@ -1,0 +1,10 @@
+{
+  "name": "错题本",
+  "short_name": "错题本",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f6f7f9",
+  "theme_color": "#2563eb",
+  "lang": "zh-CN",
+  "icons": []
+}

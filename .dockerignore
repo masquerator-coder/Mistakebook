@@ -1,0 +1,9 @@
+# 构建产物
+app/.venv/
+app/*.egg-info/
+app/src/*.egg-info/
+*.whl
+
+# 测试与缓存
+.pytest_cache/
+__pycache__/

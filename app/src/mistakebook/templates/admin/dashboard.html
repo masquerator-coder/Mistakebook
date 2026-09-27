@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>后台 · 错题本</title>
+<link rel="stylesheet" href="/css/admin.css">
+</head>
+<body>
+<header>
+  <h1>错题本后台</h1>
+  <nav>
+    <a href="/admin" class="active">总览</a>
+    <a href="/admin/coverage">知识点覆盖</a>
+    <a href="/admin/kps">知识点核对</a>
+    <a href="/admin/ai-usage">AI 用量</a>
+    <a href="/">返回应用 →</a>
+  </nav>
+</header>
+
+<main>
+  <h2>总览</h2>
+
+  <div class="grid">
+    <div class="card"><div class="n">{{ stats.total }}</div><div class="l">错题总数</div></div>
+    <div class="card"><div class="n">{{ stats.due_cnt }}</div><div class="l">待复习</div></div>
+    <div class="card"><div class="n">{{ stats.mastered_cnt }}</div><div class="l">已掌握</div></div>
+    <div class="card"><div class="n">{{ stats.reviewing_cnt }}</div><div class="l">复习中</div></div>
+    <div class="card"><div class="n">{{ stats.total_errors }}</div><div class="l">累计错次</div></div>
+  </div>
+
+  <h2>各科目</h2>
+  <table>
+    <tr><th>科目</th><th>错题数</th><th>已掌握</th><th>待复习</th></tr>
+    {% for s in stats.by_subject %}
+    <tr>
+      <td>{{ s.name }}</td>
+      <td>{{ s.total }}</td>
+      <td>{{ s.mastered_cnt }}</td>
+      <td>{{ s.due_cnt }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+
+  <h2>错因分布</h2>
+  {% if stats.by_reason %}
+  <table>
+    <tr><th>错因</th><th>题数</th></tr>
+    {% for r in stats.by_reason %}
+    <tr><td>{{ r.reason }}</td><td>{{ r.count }}</td></tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p class="muted">还没有数据。</p>
+  {% endif %}
+
+  <h2>AI 用量（近 30 天）</h2>
+  {% if usage and usage.calls %}
+  <div class="grid">
+    <div class="card"><div class="n">{{ usage.calls }}</div><div class="l">调用次数</div></div>
+    <div class="card"><div class="n">{{ usage.tokens_in }}</div><div class="l">输入 tokens</div></div>
+    <div class="card"><div class="n">{{ usage.tokens_out }}</div><div class="l">输出 tokens</div></div>
+    <div class="card"><div class="n">{{ usage.failed }}</div><div class="l">失败次数</div></div>
+  </div>
+  <p class="muted">本地部署的模型不按 token 计费，因此这里只统计用量，不折算金额。</p>
+  {% else %}
+  <p class="muted">还没有 AI 调用记录。</p>
+  {% endif %}
+</main>
+</body>
+</html>

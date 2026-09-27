@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>知识点核对 · 错题本后台</title>
+<link rel="stylesheet" href="/css/admin.css">
+</head>
+<body>
+<header>
+  <h1>错题本后台</h1>
+  <nav>
+    <a href="/admin">总览</a>
+    <a href="/admin/coverage">知识点覆盖</a>
+    <a href="/admin/kps" class="active">知识点核对</a>
+    <a href="/admin/ai-usage">AI 用量</a>
+    <a href="/">返回应用 →</a>
+  </nav>
+</header>
+
+<main>
+  <h2>知识点核对</h2>
+  <p class="muted">
+    由 AI 从教材提取的知识点默认是「待核对」。按置信度从低到高排列，
+    建议先核对靠前的条目 —— 它们最可能是错的。
+  </p>
+
+  <form method="get" class="filters">
+    <select name="subject_id" onchange="this.form.submit()">
+      {% for s in subjects %}
+      <option value="{{ s.id }}" {% if s.id == subject_id %}selected{% endif %}>{{ s.name }}</option>
+      {% endfor %}
+    </select>
+    <label class="check">
+      <input type="checkbox" name="unreviewed_only" value="true"
+             {% if unreviewed_only %}checked{% endif %} onchange="this.form.submit()">
+      只看待核对
+    </label>
+  </form>
+
+  {% if rows %}
+  <table>
+    <tr>
+      <th>名称</th><th>编码</th><th>年级</th><th>教材页</th>
+      <th>来源</th><th>置信度</th><th>状态</th><th></th>
+    </tr>
+    {% for r in rows %}
+    <tr>
+      <td>{{ r.name }}</td>
+      <td class="muted">{{ r.code or '—' }}</td>
+      <td>{{ r.grade or '—' }}</td>
+      <td>{% if r.page_from %}{{ r.page_from }}-{{ r.page_to or r.page_from }}{% else %}—{% endif %}</td>
+      <td class="muted">{{ r.source or '—' }}</td>
+      <td>
+        {% if r.confidence is not none %}
+          {{ '%.2f'|format(r.confidence) }}
+        {% else %}—{% endif %}
+      </td>
+      <td>
+        {% if r.reviewed %}<span class="tag ok">已核对</span>
+        {% else %}<span class="tag warn">待核对</span>{% endif %}
+      </td>
+      <td>
+        {% if not r.reviewed %}
+        <button class="btn" onclick="markReviewed({{ r.id }}, this)">标记已核对</button>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p class="muted">没有知识点。可先用后台的提取功能从教材生成，或手工添加。</p>
+  {% endif %}
+</main>
+
+<script>
+async function markReviewed(id, btn) {
+  btn.disabled = true;
+  try {
+    const r = await fetch(`/admin/kps/${id}/review`, { method: 'POST' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const row = btn.closest('tr');
+    row.querySelector('td:nth-child(7)').innerHTML = '<span class="tag ok">已核对</span>';
+    btn.remove();
+  } catch (e) {
+    btn.disabled = false;
+    alert('标记失败：' + e.message);
+  }
+}
+</script>
+</body>
+</html>

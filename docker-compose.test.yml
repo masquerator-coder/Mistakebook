@@ -1,0 +1,23 @@
+# 测试用的 compose 覆盖文件。
+# 用法：docker compose -f docker-compose.yml -f docker-compose.test.yml run --rm test
+#
+# 用独立数据库目录跑测试，避免集成测试的建删操作污染真实数据。
+services:
+  test:
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-mistakebook}:${POSTGRES_PASSWORD:-mistakebook_dev_pw}@db:5432/${POSTGRES_DB:-mistakebook}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-fq-dgx}
+      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-http://fq-dgx-01.local:8888/v1}
+      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-v4.1-flash}
+      MIGRATIONS_DIR: /app/migrations
+    volumes:
+      - ./app/tests:/app/tests:ro
+      - ./scripts:/app/scripts:ro
+    working_dir: /app
+    command: sh -c "PYTHONPATH=src python -m pytest tests -q --ignore=tests/probe_vision.py"

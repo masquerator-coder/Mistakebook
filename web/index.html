@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#2563eb">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="manifest" href="/manifest.webmanifest">
+<title>错题本</title>
+<link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-dot"></span>
+    <h1>错题本</h1>
+  </div>
+
+  <nav class="tabs" id="tabs">
+    <button class="tab active" data-view="list">错题</button>
+    <button class="tab" data-view="due">待复习 <span class="badge" id="due-badge"></span></button>
+    <button class="tab" data-view="analysis">学情</button>
+    <button class="tab" data-view="coverage">覆盖</button>
+    <button class="tab" data-view="plan">计划</button>
+  </nav>
+
+  <div class="topbar-right">
+    <select id="grade-select" title="年级">
+      <option value="七上">七年级上</option>
+      <option value="">全部年级</option>
+    </select>
+    <button class="btn-primary" id="btn-capture">＋ 录错题</button>
+  </div>
+</header>
+
+<!-- 模型不可达时的醒目提示：孩子看到的不能是白屏（风险 R4） -->
+<div class="banner hidden" id="offline-banner">
+  <strong>连不上服务器。</strong>
+  <span id="offline-detail">请确认电脑已开机、Docker 正在运行。</span>
+  <button class="btn-link" id="btn-retry">重试</button>
+</div>
+
+<main class="layout">
+
+  <!-- 左栏：列表 -->
+  <section class="pane list-pane" id="pane-list">
+    <div class="pane-head">
+      <h2 id="list-title">全部错题</h2>
+      <div class="filters">
+        <select id="subject-filter"><option value="">全部科目</option></select>
+        <select id="mastery-filter">
+          <option value="">全部状态</option>
+          <option value="new">新录入</option>
+          <option value="reviewing">复习中</option>
+          <option value="mastered">已掌握</option>
+        </select>
+      </div>
+    </div>
+    <div class="list-scroll" id="mistake-list">
+      <p class="empty">加载中…</p>
+    </div>
+  </section>
+
+  <!-- 右栏：详情 / 各功能视图 -->
+  <section class="pane detail-pane" id="pane-detail">
+    <div id="detail-body">
+      <p class="empty">从左边选一道错题，或者点右上角「＋ 录错题」开始。</p>
+    </div>
+  </section>
+
+</main>
+
+<!-- 录入弹层 -->
+<div class="modal-mask hidden" id="capture-modal">
+  <div class="modal">
+    <div class="modal-head">
+      <h2>录入错题</h2>
+      <button class="btn-icon" id="capture-close" aria-label="关闭">✕</button>
+    </div>
+
+    <div class="modal-body">
+      <div class="field">
+        <label>科目 <span class="req">*</span></label>
+        <select id="cap-subject"></select>
+      </div>
+
+      <div class="field">
+        <label>题目照片</label>
+        <div class="capture-row">
+          <button class="btn-secondary" id="btn-camera">📷 拍照 / 选图</button>
+          <span class="hint" id="cap-file-hint">未选择</span>
+        </div>
+        <input type="file" id="cap-file" accept="image/*" capture="environment" hidden>
+        <img id="cap-preview" class="preview hidden" alt="题目预览">
+        <button class="btn-ai hidden" id="btn-read">🤖 让 AI 读题</button>
+        <p class="hint" id="cap-read-status"></p>
+      </div>
+
+      <div class="field">
+        <label>题干 <span class="req">*</span></label>
+        <textarea id="cap-stem" rows="4" placeholder="题目内容，或点上面「让 AI 读题」自动填"></textarea>
+      </div>
+
+      <div class="field-2col">
+        <div class="field">
+          <label>正确答案</label>
+          <input type="text" id="cap-answer" placeholder="选填">
+        </div>
+        <div class="field">
+          <label>我的错误答案</label>
+          <input type="text" id="cap-student-answer" placeholder="选填">
+        </div>
+      </div>
+
+      <div class="field">
+        <label>错因</label>
+        <select id="cap-reason">
+          <option value="">未选择</option>
+          <option value="concept">概念不清</option>
+          <option value="calculation">计算错误</option>
+          <option value="misread">看错题</option>
+          <option value="method">方法不会</option>
+          <option value="careless">粗心</option>
+          <option value="time">来不及</option>
+          <option value="unknown">说不清</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label>知识点 <span class="opt">（选填，但选了之后学情分析才有依据）</span></label>
+        <div class="kp-picker" id="cap-kps">
+          <p class="hint">选择科目后加载…</p>
+        </div>
+      </div>
+
+      <p class="error-text" id="cap-error"></p>
+    </div>
+
+    <div class="modal-foot">
+      <button class="btn-secondary" id="capture-cancel">取消</button>
+      <button class="btn-primary" id="btn-save">保存</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast hidden" id="toast"></div>
+
+<script type="module" src="/js/app.js"></script>
+</body>
+</html>

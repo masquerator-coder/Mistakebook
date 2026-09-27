@@ -1,0 +1,62 @@
+# 顶层 name 必须显式指定：目录名含中文时，Compose 无法从目录名推导项目名，
+# 会直接报 "project name must not be empty" 而无法启动。
+name: mistakebook
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-mistakebook}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mistakebook_dev_pw}
+      POSTGRES_DB: ${POSTGRES_DB:-mistakebook}
+      # 中文排序与比较
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8"
+    volumes:
+      - ./data/pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-mistakebook} -d ${POSTGRES_DB:-mistakebook}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    # 只在局域网内使用，不对宿主暴露数据库端口
+    expose:
+      - "5432"
+
+  api:
+    build:
+      # 上下文是仓库根目录：Dockerfile 里要同时拷 app/ 与 web/
+      context: .
+      dockerfile: app/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-mistakebook}:${POSTGRES_PASSWORD:-mistakebook_dev_pw}@db:5432/${POSTGRES_DB:-mistakebook}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-fq-dgx}
+      # 必须用全限定名 fq-dgx-01.local，不能用裸主机名 fq-dgx-01：
+      # Docker 内置 DNS(127.0.0.11) 不继承宿主机 DNS 后缀，裸名在容器里解析失败。
+      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-http://fq-dgx-01.local:8888/v1}
+      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-v4.1-flash}
+      DAILY_REVIEW_MINUTES: ${DAILY_REVIEW_MINUTES:-20}
+      UPLOAD_DIR: /app/data/uploads
+      BOOK_DIR: /app/data/books
+    volumes:
+      - ./data/uploads:/app/data/uploads
+      - ./data/books:/app/data/books
+      # 前端与模板用挂载覆盖镜像内副本：改界面不必重建镜像，刷新即可生效
+      - ./web:/app/web:ro
+      - ./app/src/mistakebook/templates:/app/src/mistakebook/templates:ro
+      # 测试代码挂载进来，便于 `docker compose exec api python -m pytest`
+      - ./app/tests:/app/tests:ro
+      # 迁移也用挂载覆盖：新增迁移文件后只需重启容器，不必重建镜像
+      - ./app/migrations:/app/migrations:ro
+    ports:
+      - "${API_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s

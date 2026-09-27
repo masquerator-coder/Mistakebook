@@ -1,0 +1,36 @@
+# 环境与密钥
+.env
+
+# 运行时数据：题目原图、教材 PDF、数据库卷
+data/uploads/*
+!data/uploads/.gitkeep
+data/books/*
+!data/books/.gitkeep
+data/pgdata/
+
+# 数据库备份：含孩子的真实错题与个人信息，绝不入库
+# （README 的备份步骤会写到这个目录，忘了忽略就会把个人数据提交上去）
+backup/
+# 注意：不要写裸的 *.sql —— 它会连 app/migrations/*.sql 一起忽略，
+# 而迁移文件是必须入库的源码。只忽略仓库根目录下的散落转储文件。
+/*.sql
+/*.dump
+
+# 早期调试残留（非本项目文件，保留在磁盘但不入库）
+_probe/
+*.bin
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+
+# 编辑器与系统
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+
+# 工具会话目录
+.superpowers/

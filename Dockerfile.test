@@ -1,0 +1,21 @@
+# 测试镜像：在运行镜像之上加测试依赖。
+# 运行镜像保持精简（不含 pytest），测试环境可复现。
+#
+# 用法（推荐）：
+#   docker compose -f docker-compose.yml -f docker-compose.test.yml run --rm test
+#
+# ⚠️ 重要陷阱：本镜像 `FROM mistakebook-api:latest`，源码是**构建时烤进去**的。
+#    因此改了 app/src 下的后端代码后，只重建 test 不够 —— 它会复用旧的
+#    api 镜像层，测试跑的还是老代码（表现为「明明改了却还是旧行为」）。
+#    正确顺序：
+#        docker compose build api
+#        docker compose -f docker-compose.yml -f docker-compose.test.yml build test
+#    或者一步到位：docker compose up -d --build api && docker compose ... build test
+#
+#    （测试没覆盖到的 scripts/ 与 app/tests/ 是挂载进去的，改它们不需要重建。）
+
+FROM mistakebook-api:latest
+
+RUN pip install --no-cache-dir pytest pytest-asyncio
+
+WORKDIR /app
