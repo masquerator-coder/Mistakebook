@@ -17,7 +17,6 @@ from ..models import (
     MistakeCreate,
     MistakeOut,
     MistakeUpdate,
-    ReviewLogOut,
     UploadOut,
 )
 from ..services import imaging, srs
@@ -119,18 +118,6 @@ def due_mistakes(limit: int = Query(default=50, le=500)) -> list[dict]:
 @router.get("/mistakes/{mistake_id}", response_model=MistakeOut)
 def get_mistake(mistake_id: int) -> dict:
     return _get_mistake(mistake_id)
-
-
-@router.get("/mistakes/{mistake_id}/reviews", response_model=list[ReviewLogOut])
-def list_reviews(mistake_id: int) -> list[dict]:
-    _get_mistake(mistake_id)
-    return db.fetch(
-        """
-        SELECT id, reviewed_at, result, duration_sec, note
-        FROM review_log WHERE mistake_id = %s ORDER BY reviewed_at DESC
-        """,
-        (mistake_id,),
-    )
 
 
 @router.post("/mistakes", response_model=MistakeOut, status_code=201)

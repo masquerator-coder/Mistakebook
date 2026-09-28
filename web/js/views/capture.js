@@ -10,6 +10,7 @@
 
 import { api } from '../api.js';
 import { el, clear, toast, describeError, REASON_LABEL } from '../ui.js';
+import { createCropper } from './crop.js';
 
 export function createCapture({ getGrade, onSaved }) {
   const modal = document.getElementById('capture-modal');
@@ -18,6 +19,7 @@ export function createCapture({ getGrade, onSaved }) {
   const fileHint = document.getElementById('cap-file-hint');
   const preview = document.getElementById('cap-preview');
   const btnRead = document.getElementById('btn-read');
+  const btnCrop = document.getElementById('btn-crop');
   const readStatus = document.getElementById('cap-read-status');
   const stemTa = document.getElementById('cap-stem');
   const answerIn = document.getElementById('cap-answer');
@@ -29,6 +31,20 @@ export function createCapture({ getGrade, onSaved }) {
   let uploadedPath = null;
   let kpCache = {};       // subjectId -> kp list
   let suggestedNames = [];
+  // 最近一次选择的原始文件：裁剪后要重新上传，但原始文件仍保留，
+  // 好让孩子裁剪得不满意时能「重选整张」再来一次。
+  let lastFile = null;
+
+  const cropper = createCropper({
+    onDone: (blob) => {
+      // 裁剪结果按新文件重新走一遍上传：服务端的 imaging 会统一压到
+      // 最长边 2000px 并修正 EXIF 方向，绕过它直接写文件会破坏这个约定。
+      const name = (lastFile?.name || 'crop').replace(/\.\w+$/, '') + '-crop.jpg';
+      const f = new File([blob], name, { type: 'image/jpeg' });
+      lastFile = f;
+      doUpload(f);
+    },
+  });
 
   /**
    * 填充科目下拉。
@@ -63,11 +79,13 @@ export function createCapture({ getGrade, onSaved }) {
   function reset() {
     uploadedPath = null;
     suggestedNames = [];
+    lastFile = null;
     fileInput.value = '';
     fileHint.textContent = '未选择';
     preview.classList.add('hidden');
     preview.removeAttribute('src');
     btnRead.classList.add('hidden');
+    btnCrop.classList.add('hidden');
     readStatus.textContent = '';
     stemTa.value = '';
     answerIn.value = '';
@@ -150,6 +168,7 @@ export function createCapture({ getGrade, onSaved }) {
       preview.src = res.url;
       preview.classList.remove('hidden');
       btnRead.classList.remove('hidden');
+      btnCrop.classList.remove('hidden');
       errP.textContent = '';
     } catch (e) {
       fileHint.textContent = '上传失败';
@@ -224,10 +243,20 @@ export function createCapture({ getGrade, onSaved }) {
   document.getElementById('btn-save').addEventListener('click', save);
   document.getElementById('btn-camera').addEventListener('click', () => fileInput.click());
   btnRead.addEventListener('click', doRead);
+  btnCrop.addEventListener('click', () => {
+    // 用最近一次选的文件重新进裁剪，而不是拿已经上传过的图片再裁 ——
+    // 上传后的图已被压到 2000px，二次裁剪会再损失一次画质。
+    if (lastFile) cropper.open(lastFile);
+  });
   subjectSel.addEventListener('change', () => { suggestedNames = []; loadKps(); });
   fileInput.addEventListener('change', () => {
     const f = fileInput.files?.[0];
-    if (f) doUpload(f);
+    if (!f) return;
+    lastFile = f;
+    // 拍照后**先裁再传**：原图往往整页都是内容，直接上传再让 AI 读，
+    // 会把旁边的题一起读进来。裁剪是读题准确率的前提，不是可选项，
+    // 因此这里主动打开裁剪层；不想裁的话点「全选」即可，成本极低。
+    cropper.open(f);
   });
   modal.addEventListener('click', (e) => { if (e.target === modal) close(); });
 

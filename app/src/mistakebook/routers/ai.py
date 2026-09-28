@@ -16,7 +16,17 @@ from fastapi import APIRouter
 from .. import db
 from ..config import settings
 from ..errors import AiError, NotFoundError, ValidationError
-from ..models import AiJobOut, ExplainIn, ReadQuestionIn, ReadQuestionOut
+from ..models import (
+    AiJobOut,
+    ChatAskIn,
+    ChatMessageOut,
+    ChatOut,
+    ExplainIn,
+    ReadQuestionIn,
+    ReadQuestionOut,
+    SuggestKpsIn,
+    SuggestKpsOut,
+)
 from ..services import analysis, deepseek, prompts
 
 log = logging.getLogger(__name__)
@@ -103,6 +113,55 @@ async def read_question(payload: ReadQuestionIn) -> dict:
     }
 
 
+def _explain_hash(row: dict, kp_names: list[str]) -> str:
+    """讲解缓存的指纹。生成与查缓存两处必须用同一份算法。
+
+    知识点名称参与指纹，因此必须排序：否则同一组知识点换个返回顺序
+    就会算出不同的 hash，导致缓存白白失效、重复烧 token。
+    """
+    return _hash("explain", row["stem_text"], row["answer_text"],
+                 row["student_answer"], row["wrong_reason"], sorted(kp_names))
+
+
+@router.get("/explain/{mistake_id}/cached", response_model=AiJobOut)
+def explain_cached(mistake_id: int) -> dict:
+    """**只查缓存**，绝不调模型。
+
+    存在的理由：详情页希望在打开时就把已经生成过的讲解显示出来，
+    但 `POST /explain` 在不带 force 时也会在**缓存未命中时真的调用模型**。
+    若前端用 POST 来做这件事，每次打开一道没讲解过的题都会烧一次 token，
+    而且在孩子没要求讲解的情况下弹出一段十几秒的等待。
+
+    因此把「查缓存」和「生成讲解」拆成两个端点，语义明确不会误用。
+    """
+    row = db.fetchrow(
+        """
+        SELECT stem_text, answer_text, student_answer, wrong_reason
+        FROM mistake WHERE id = %s AND deleted_at IS NULL
+        """,
+        (mistake_id,),
+    )
+    if row is None:
+        raise NotFoundError("错题不存在或已删除")
+
+    kp_names = db.fetch(
+        """
+        SELECT kp.name FROM mistake_kp mk
+        JOIN knowledge_point kp ON kp.id = mk.kp_id
+        WHERE mk.mistake_id = %s ORDER BY kp.id
+        """,
+        (mistake_id,),
+    )
+
+    # 指纹算法必须与 explain() 完全一致，否则永远查不到缓存 ——
+    # 两边共用一个 _explain_hash，避免改漏一处。
+    input_hash = _explain_hash(row, [k["name"] for k in kp_names])
+    hit = _cached("explain", input_hash)
+    if hit is None:
+        return {"status": "pending", "payload": None}
+    return {"status": "done", "payload": hit}
+
+
 @router.post("/explain", response_model=AiJobOut)
 async def explain(payload: ExplainIn) -> dict:
     row = db.fetchrow(
@@ -126,11 +185,7 @@ async def explain(payload: ExplainIn) -> dict:
     )
     kp_names = [k["name"] for k in kps]
 
-    # 知识点名称参与指纹，因此必须排序：否则同一组知识点换个返回顺序
-    # 就会算出不同的 hash，导致缓存白白失效、重复烧 token。
-    # （SQL 里已加 ORDER BY，这里再排一次是为了不依赖调用方。）
-    input_hash = _hash("explain", row["stem_text"], row["answer_text"],
-                       row["student_answer"], row["wrong_reason"], sorted(kp_names))
+    input_hash = _explain_hash(row, kp_names)
     if not payload.force:
         hit = _cached("explain", input_hash)
         if hit is not None:
@@ -220,3 +275,297 @@ def subject_analysis(subject_id: int, grade: str | None = None) -> dict:
 @router.get("/analysis/overview")
 def overview() -> dict:
     return analysis.mistake_stats()
+
+
+# ── 讲解追问：聊天式多轮对话 ──────────────────────────────────────────
+#
+# 设计取舍：**不做流式输出**。chat_text 是一次性返回的，追加 SSE/WebSocket
+# 会让这个无构建的原生前端复杂一大截，而单条回答在十几秒内就能返回，
+# 前端用「老师正在想…」占位即可。真要改成流式时，这个端点是唯一改动点。
+#
+# 上下文只保留最近 MAX_HISTORY 轮：模型窗口有限，且越早的对话与当前
+# 追问的相关性越低。截断**从最旧的一侧**丢，保留最近的上下文。
+
+MAX_HISTORY = 12          # 最多带 12 条历史消息（约 6 轮问答）
+MAX_QUESTION_CHARS = 500  # 单条提问长度上限
+
+
+def _get_chat(cur_or_none, mistake_id: int) -> int:
+    """取该错题的会话 id，没有就建一个。
+
+    一条错题一个会话，不提供多会话 —— 孩子问的就是这道题，
+    多会话只会让他找不到上次问到哪。
+    """
+    row = db.fetchrow("SELECT id FROM explain_chat WHERE mistake_id = %s", (mistake_id,))
+    if row:
+        return row["id"]
+    created = db.execute_returning(
+        "INSERT INTO explain_chat (mistake_id) VALUES (%s) RETURNING id", (mistake_id,)
+    )
+    return created["id"]
+
+
+def _mistake_context(mistake_id: int) -> dict:
+    row = db.fetchrow(
+        """
+        SELECT id, stem_text, image_path, answer_text, student_answer, wrong_reason
+        FROM mistake WHERE id = %s AND deleted_at IS NULL
+        """,
+        (mistake_id,),
+    )
+    if row is None:
+        raise NotFoundError("错题不存在或已删除")
+    return row
+
+
+@router.get("/explain/{mistake_id}/chat", response_model=ChatOut)
+def get_chat(mistake_id: int) -> dict:
+    """取这道题的追问记录。没聊过时返回空列表，不建会话。"""
+    _mistake_context(mistake_id)
+    row = db.fetchrow("SELECT id FROM explain_chat WHERE mistake_id = %s", (mistake_id,))
+    if row is None:
+        return {"chat_id": None, "messages": []}
+    msgs = db.fetch(
+        """
+        SELECT id, role, content, created_at
+        FROM explain_message WHERE chat_id = %s ORDER BY created_at, id
+        """,
+        (row["id"],),
+    )
+    return {"chat_id": row["id"], "messages": msgs}
+
+
+@router.delete("/explain/{mistake_id}/chat", status_code=204)
+def clear_chat(mistake_id: int) -> None:
+    """清空追问记录。只删消息，会话行保留（避免 id 反复重建）。"""
+    row = db.fetchrow("SELECT id FROM explain_chat WHERE mistake_id = %s", (mistake_id,))
+    if row is not None:
+        db.execute("DELETE FROM explain_message WHERE chat_id = %s", (row["id"],))
+
+
+@router.post("/explain/{mistake_id}/chat", response_model=ChatOut)
+async def ask_followup(mistake_id: int, payload: ChatAskIn) -> dict:
+    """孩子追问一句，AI 回答一句。问答都会落库，下次打开还在。"""
+    question = payload.question.strip()
+    if not question:
+        raise ValidationError("请输入想问的问题")
+    if len(question) > MAX_QUESTION_CHARS:
+        raise ValidationError(f"问题太长，请控制在 {MAX_QUESTION_CHARS} 字以内")
+
+    m = _mistake_context(mistake_id)
+    chat_id = _get_chat(None, mistake_id)
+
+    prev = db.fetch(
+        """
+        SELECT role, content FROM explain_message
+        WHERE chat_id = %s ORDER BY created_at DESC, id DESC LIMIT %s
+        """,
+        (chat_id, MAX_HISTORY),
+    )
+    prev.reverse()  # 取的是最近的 N 条，回正后按时间正序拼进对话
+
+    # 题目信息只作为**每次请求都带的系统上下文**，不进可滚动的历史 ——
+    # 否则截断历史时可能把题目本身截掉，模型就开始凭空回答。
+    context_parts = ["【这道题的背景】"]
+    if m["stem_text"]:
+        context_parts.append(f"题目：{m['stem_text']}")
+    if m["answer_text"]:
+        context_parts.append(f"正确答案：{m['answer_text']}")
+    if m["student_answer"]:
+        context_parts.append(f"学生的错误答案：{m['student_answer']}")
+    if not m["stem_text"] and m["image_path"]:
+        context_parts.append("（这道题只有图片，没有文字题干）")
+
+    blocks: list[dict[str, Any]] = []
+    # 带图：孩子追问经常是「图上这个地方为什么这样」，没有图就答不了
+    if m["image_path"]:
+        try:
+            from ..services import imaging
+
+            p = imaging.resolve_image(m["image_path"])
+            if p.is_file():
+                blocks.append(deepseek.image_block(p))
+        except imaging.InvalidImagePath:
+            log.warning("错题 %s 的图片路径非法，追问时不带图", m["id"])
+
+    lines = list(context_parts)
+    if prev:
+        lines.append("\n【之前的对话】")
+        for p in prev:
+            who = "学生" if p["role"] == "user" else "你（老师）"
+            lines.append(f"{who}：{p['content']}")
+    lines.append(f"\n【学生这次的问题】\n{question}")
+
+    blocks.append(deepseek.text_block("\n".join(lines)))
+
+    answer = await deepseek.chat_text(prompts.CHAT_SYSTEM, blocks, "explain_chat", max_tokens=1024)
+
+    with db.transaction() as cur:
+        cur.execute(
+            "INSERT INTO explain_message (chat_id, role, content) VALUES (%s, 'user', %s)",
+            (chat_id, question),
+        )
+        cur.execute(
+            "INSERT INTO explain_message (chat_id, role, content) VALUES (%s, 'assistant', %s)",
+            (chat_id, answer),
+        )
+
+    msgs = db.fetch(
+        """
+        SELECT id, role, content, created_at
+        FROM explain_message WHERE chat_id = %s ORDER BY created_at, id
+        """,
+        (chat_id,),
+    )
+    return {"chat_id": chat_id, "answer": answer, "messages": msgs}
+
+
+# ── AI 自动归类到知识点 ───────────────────────────────────────────────
+#
+# 关键约束：模型只能从**该科目已有的知识点**里挑，不能自创名称。
+# 自由生成的名字会导致同一知识点每次写法不同，归类结果无法聚合，
+# 「按类复习」也就落不了地。因此候选清单由 SQL 给出，模型只做选择题。
+
+
+def _candidate_kps(subject_id: int, grade: str | None, limit: int = 60) -> list[dict]:
+    """候选知识点。优先该年级的，不够再补该科目其他年级的。"""
+    rows = db.fetch(
+        """
+        SELECT id, name, grade, parent_id FROM knowledge_point
+        WHERE subject_id = %s AND (%s::text IS NULL OR grade = %s)
+        ORDER BY sort_order, id LIMIT %s
+        """,
+        (subject_id, grade, grade, limit),
+    )
+    if len(rows) < 5 and grade:
+        more = db.fetch(
+            """
+            SELECT id, name, grade, parent_id FROM knowledge_point
+            WHERE subject_id = %s AND (grade IS DISTINCT FROM %s)
+            ORDER BY sort_order, id LIMIT %s
+            """,
+            (subject_id, grade, limit - len(rows)),
+        )
+        rows.extend(more)
+    return rows
+
+
+@router.post("/suggest-kps", response_model=SuggestKpsOut)
+async def suggest_kps(payload: SuggestKpsIn) -> dict:
+    """让模型从现有知识点里挑出最匹配的若干个。**不写库**，交给用户确认。"""
+    m = db.fetchrow(
+        """
+        SELECT m.id, m.subject_id, m.stem_text, m.image_path, m.answer_text,
+               m.student_answer, m.wrong_reason, s.name AS subject_name
+        FROM mistake m JOIN subject s ON s.id = m.subject_id
+        WHERE m.id = %s AND m.deleted_at IS NULL
+        """,
+        (payload.mistake_id,),
+    )
+    if m is None:
+        raise NotFoundError("错题不存在或已删除")
+
+    # 年级取已关联知识点的年级，取不到就不过滤（宁可候选多，不可候选空）
+    grade = db.fetchval(
+        """
+        SELECT kp.grade FROM mistake_kp mk JOIN knowledge_point kp ON kp.id = mk.kp_id
+        WHERE mk.mistake_id = %s AND kp.grade IS NOT NULL LIMIT 1
+        """,
+        (payload.mistake_id,),
+    )
+
+    cands = _candidate_kps(m["subject_id"], grade)
+    if not cands:
+        return {
+            "matched": False,
+            "picked": [],
+            "reason": f"「{m['subject_name']}」还没有知识点，请先在后台补充。",
+            "candidates": [],
+        }
+
+    # 候选名称清单是模型的「选项」，必须原样回传名称；这里建索引用于校验与回填 id
+    by_name = {c["name"]: c for c in cands}
+    names = [c["name"] for c in cands]
+
+    parts = [f"科目：{m['subject_name']}"]
+    if grade:
+        parts.append(f"年级：{grade}")
+    if m["stem_text"]:
+        parts.append(f"题目：{m['stem_text']}")
+    if m["answer_text"]:
+        parts.append(f"正确答案：{m['answer_text']}")
+    if m["student_answer"]:
+        parts.append(f"学生的错误答案：{m['student_answer']}")
+
+    blocks: list[dict[str, Any]] = []
+    if m["image_path"]:
+        try:
+            from ..services import imaging
+
+            p = imaging.resolve_image(m["image_path"])
+            if p.is_file():
+                blocks.append(deepseek.image_block(p))
+        except imaging.InvalidImagePath:
+            log.warning("错题 %s 的图片路径非法，归类时不带图", m["id"])
+
+    blocks.append(
+        deepseek.text_block(
+            "\n".join(parts)
+            + "\n\n【候选知识点，只能从这里面选，名称必须原样复制】\n"
+            + "\n".join(f"- {n}" for n in names)
+        )
+    )
+
+    result = await deepseek.chat_json(prompts.CATEGORIZE_SYSTEM, blocks, "categorize")
+
+    raw_picked = result.get("picked") or []
+    if not isinstance(raw_picked, list):
+        raw_picked = []
+
+    # 校验：模型必须从候选里选。凭空造出来的名字直接丢弃并记日志 ——
+    # 静默接受会让库里出现无法聚合的野知识点，而且没人会发现。
+    picked: list[dict] = []
+    rejected: list[str] = []
+    for name in raw_picked[: max(1, payload.limit)]:
+        cleaned = str(name).strip()
+        if cleaned in by_name:
+            picked.append(
+                {"id": by_name[cleaned]["id"], "name": cleaned,
+                 "grade": by_name[cleaned]["grade"]}
+            )
+        elif cleaned:
+            rejected.append(cleaned)
+
+    if rejected:
+        log.warning("归类返回了候选外的知识点，已丢弃：%s", rejected)
+
+    return {
+        "matched": bool(picked),
+        "picked": picked,
+        "reason": (result.get("reason") or "").strip(),
+        "candidates": [{"id": c["id"], "name": c["name"]} for c in cands],
+        "rejected": rejected,
+    }
+
+
+@router.post("/auto-categorize/{mistake_id}", response_model=SuggestKpsOut)
+async def auto_categorize(mistake_id: int) -> dict:
+    """一键归类：让 AI 挑知识点并**直接写入**关联表。
+
+    与 suggest-kps 的区别是它会写库。用户点「自动归类」时是在明确要求
+    「你来定」，因此这里不必再确认一次；结果会回显，不满意可以再手工改。
+    """
+    out = await suggest_kps(SuggestKpsIn(mistake_id=mistake_id, limit=3))
+    if not out["matched"]:
+        return out
+
+    kp_ids = [p["id"] for p in out["picked"]]
+    with db.transaction() as cur:
+        cur.executemany(
+            """
+            INSERT INTO mistake_kp (mistake_id, kp_id) VALUES (%s, %s)
+            ON CONFLICT DO NOTHING
+            """,
+            [(mistake_id, k) for k in kp_ids],
+        )
+    return out

@@ -113,3 +113,46 @@ export function loading(text = '加载中…') {
 export function empty(text) {
   return el('p', { class: 'empty' }, text);
 }
+
+/* ── 正文字号 ─────────────────────────────────────────
+   孩子在不同距离/光线下看题（平板架在桌上、手机拿在手里），
+   固定的 15px 一定有一半场景不合适。字号存 localStorage：
+   家长调一次，之后每次打开都是调好的大小。 */
+
+export const FONT_SIZES = [15, 17, 19, 22, 26];
+export const DEFAULT_FONT_INDEX = 1;
+const FONT_KEY = 'mistakebook.fontIndex';
+
+export function loadFontIndex() {
+  try {
+    const raw = localStorage.getItem(FONT_KEY);
+    const n = Number(raw);
+    if (Number.isInteger(n) && n >= 0 && n < FONT_SIZES.length) return n;
+  } catch { /* 隐私模式下 localStorage 可能不可用，退回默认值 */ }
+  return DEFAULT_FONT_INDEX;
+}
+
+export function applyFontIndex(index) {
+  const i = Math.max(0, Math.min(FONT_SIZES.length - 1, index));
+  // 挂在 <html> 上而不是 <body>：这样 CSS 变量能覆盖到所有后代，
+  // 也不必关心 body 上还挂着哪些 class（show-detail 之类）。
+  document.documentElement.style.setProperty('--reading-size', `${FONT_SIZES[i]}px`);
+  try {
+    localStorage.setItem(FONT_KEY, String(i));
+  } catch { /* 存不下不影响本次调节 */ }
+  return i;
+}
+
+/* 复习结果的统一文案。详情页按钮、历史表格、toast 都用这一份 ——
+   三处各写一遍必然会出现「又错了」和「做错」两种说法。 */
+export const REVIEW_LABEL = {
+  correct: '做对了',
+  partial: '半对',
+  wrong: '又错了',
+};
+
+export const REVIEW_LABEL_SHORT = {
+  correct: '做对',
+  partial: '半对',
+  wrong: '做错',
+};

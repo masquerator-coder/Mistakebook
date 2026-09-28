@@ -134,6 +134,8 @@ class ReviewSubmit(BaseModel):
     result: ReviewResult
     duration_sec: int | None = None
     note: str | None = None
+    # 宽限期内改判上一次复习。前端在「刚点完、还没超时」时才传 true。
+    redo: bool = False
 
 
 class ReviewLogOut(BaseModel):
@@ -142,6 +144,28 @@ class ReviewLogOut(BaseModel):
     result: str
     duration_sec: int | None = None
     note: str | None = None
+
+
+class ReviewLogCreated(ReviewLogOut):
+    """刚写入（或被改判替换掉）的那条复习记录的摘要。"""
+
+
+class ReviewSubmitOut(MistakeOut):
+    """复习提交的响应。
+
+    在**改动前就有的**错题字段之上（interval_days / correct_streak /
+    next_review_at 等，老调用方与前端都在读，不能动），补三样东西：
+
+    - `last_review`：本次写入或被替换的那条复习记录；
+    - `history`：整条复习历史。前端要据此判断「下一次点击算改判还是新记录」，
+      把这份判断放在客户端凭本地时间猜，会因两端时钟不一致而误判；
+    - `redo` / `updated`：本次是改判、还是重复点击被忽略。
+    """
+
+    last_review: ReviewLogCreated | None = None
+    history: list[ReviewLogOut] = Field(default_factory=list)
+    redo: bool = False
+    updated: bool = True
 
 
 class UploadOut(BaseModel):
@@ -166,6 +190,45 @@ class ReadQuestionOut(BaseModel):
 class ExplainIn(BaseModel):
     mistake_id: int
     force: bool = False
+
+
+class ChatAskIn(BaseModel):
+    """讲解追问的一条提问。长度上限在路由里校验，这里不设 —— 
+    好让错误信息是中文的、可展示的，而不是 pydantic 的英文骨架。"""
+
+    question: str
+
+
+class SuggestKpsIn(BaseModel):
+    mistake_id: int
+    limit: int = Field(default=3, ge=1, le=5)
+
+
+class ChatMessageOut(BaseModel):
+    id: int
+    role: Literal["user", "assistant"]
+    content: str
+    created_at: dt.datetime
+
+
+class ChatOut(BaseModel):
+    chat_id: int | None = None
+    messages: list[ChatMessageOut] = Field(default_factory=list)
+    answer: str | None = None
+
+
+class SuggestedKp(BaseModel):
+    id: int
+    name: str
+    grade: str | None = None
+
+
+class SuggestKpsOut(BaseModel):
+    matched: bool
+    picked: list[SuggestedKp] = Field(default_factory=list)
+    reason: str = ""
+    candidates: list[dict] = Field(default_factory=list)
+    rejected: list[str] = Field(default_factory=list)
 
 
 class AiJobOut(BaseModel):

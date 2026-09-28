@@ -118,7 +118,29 @@ export const api = {
   explain: (mistakeId, force = false) =>
     request('/api/ai/explain', { ...json('POST', { mistake_id: mistakeId, force }), timeout: 180000 }),
 
+  /* 只查讲解缓存，不生成。详情页打开时用这个，避免无意中触发模型调用。 */
+  explainCached: (mistakeId) => request(`/api/ai/explain/${mistakeId}/cached`),
+
   analyzeMistake: (id) => request(`/api/ai/analyze-mistake/${id}`, { method: 'POST' }),
+
+  /* 讲解追问：一条错题一个会话。messages 为空表示还没聊过。 */
+  explainChat: (mistakeId) => request(`/api/ai/explain/${mistakeId}/chat`),
+  chatAsk: (mistakeId, question) =>
+    request(`/api/ai/explain/${mistakeId}/chat`, {
+      ...json('POST', { question }),
+      timeout: 180000,
+    }),
+  clearChat: (mistakeId) =>
+    request(`/api/ai/explain/${mistakeId}/chat`, { method: 'DELETE' }),
+
+  /* AI 自动归类：让模型从该科已有知识点里挑，返回候选供用户确认后才写入。 */
+  suggestKps: (mistakeId, limit = 3) =>
+    request(`/api/ai/suggest-kps`, {
+      ...json('POST', { mistake_id: mistakeId, limit }),
+      timeout: 180000,
+    }),
+  autoCategorize: (mistakeId) =>
+    request(`/api/ai/auto-categorize/${mistakeId}`, { method: 'POST', timeout: 180000 }),
 
   subjectAnalysis: (subjectId, grade) => {
     const q = new URLSearchParams();

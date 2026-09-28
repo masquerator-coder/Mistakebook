@@ -13,6 +13,7 @@
 
 <header class="topbar">
   <div class="brand">
+    <button class="btn-icon" id="btn-toggle-list" aria-label="收起/展开左侧列表" title="收起或展开左侧列表">☰</button>
     <span class="brand-dot"></span>
     <h1>错题本</h1>
   </div>
@@ -30,6 +31,11 @@
       <option value="七上">七年级上</option>
       <option value="">全部年级</option>
     </select>
+    <div class="font-ctl" id="font-ctl">
+      <button class="btn-icon" id="btn-font-down" aria-label="缩小全站字号" title="缩小字号">A−</button>
+      <span class="font-value" id="font-value">标准</span>
+      <button class="btn-icon" id="btn-font-up" aria-label="放大全站字号" title="放大字号">A+</button>
+    </div>
     <button class="btn-primary" id="btn-capture">＋ 录错题</button>
   </div>
 </header>
@@ -64,6 +70,8 @@
 
   <!-- 右栏：详情 / 各功能视图 -->
   <section class="pane detail-pane" id="pane-detail">
+    <!-- 窄屏上详情是独立一屏，必须有明显的返回入口，否则孩子会以为卡住了 -->
+    <button class="btn-secondary back-btn" id="btn-back">← 返回列表</button>
     <div id="detail-body">
       <p class="empty">从左边选一道错题，或者点右上角「＋ 录错题」开始。</p>
     </div>
@@ -93,7 +101,10 @@
         </div>
         <input type="file" id="cap-file" accept="image/*" capture="environment" hidden>
         <img id="cap-preview" class="preview hidden" alt="题目预览">
-        <button class="btn-ai hidden" id="btn-read">🤖 让 AI 读题</button>
+        <div class="btn-row">
+          <button class="btn-secondary btn-sm hidden" id="btn-crop">✂️ 裁剪</button>
+          <button class="btn-ai hidden" id="btn-read">🤖 让 AI 读题</button>
+        </div>
         <p class="hint" id="cap-read-status"></p>
       </div>
 
@@ -140,6 +151,43 @@
     <div class="modal-foot">
       <button class="btn-secondary" id="capture-cancel">取消</button>
       <button class="btn-primary" id="btn-save">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 裁剪弹层：拍照后裁剪出题目区域，避免一整张卷子送进模型 -->
+<div class="modal-mask hidden" id="crop-modal">
+  <div class="modal crop-modal">
+    <div class="modal-head">
+      <h2>裁剪题目区域</h2>
+      <button class="btn-icon" id="crop-close" aria-label="关闭">✕</button>
+    </div>
+
+    <div class="modal-body">
+      <p class="hint" id="crop-hint">
+        拖动方框调整范围，或直接拖动方框外的图片移动画面。只留题目那部分，
+        拍得越干净，AI 读题越准。
+      </p>
+      <div class="crop-stage" id="crop-stage">
+        <canvas id="crop-canvas"></canvas>
+        <div class="crop-selection" id="crop-selection">
+          <span class="crop-handle" data-handle="nw"></span>
+          <span class="crop-handle" data-handle="ne"></span>
+          <span class="crop-handle" data-handle="sw"></span>
+          <span class="crop-handle" data-handle="se"></span>
+        </div>
+      </div>
+      <div class="crop-tools">
+        <button class="btn-secondary btn-sm" id="crop-reset">重选整张</button>
+        <button class="btn-secondary btn-sm" id="crop-rotate">↻ 旋转 90°</button>
+        <button class="btn-secondary btn-sm" id="crop-full">全选</button>
+      </div>
+      <p class="error-text" id="crop-error"></p>
+    </div>
+
+    <div class="modal-foot">
+      <button class="btn-secondary" id="crop-cancel">取消</button>
+      <button class="btn-primary" id="crop-apply">用这张</button>
     </div>
   </div>
 </div>

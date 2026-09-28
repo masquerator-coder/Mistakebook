@@ -63,6 +63,21 @@ class FakeEl {
   click() { (this.listeners.click || []).forEach((f) => f({ target: this })); }
   querySelector() { return null; }
   get options() { return this.children; }
+  // crop.js（裁剪层）在构造时就拿 canvas 的 2d 上下文。垫片必须提供它，
+  // 否则整个 capture 视图会因为「读不到 getContext」而构造失败，
+  // 连带下面所有与裁剪无关的断言一起变红 —— 那种失败方向会误导排查。
+  getContext() {
+    return {
+      setTransform() {}, translate() {}, rotate() {}, drawImage() {},
+      getImageData() { return { data: new Uint8ClampedArray(4) }; },
+    };
+  }
+  toBlob(cb) { cb(null); }
+  getBoundingClientRect() {
+    return { left: 0, top: 0, width: 320, height: 240 };
+  }
+  setPointerCapture() {}
+  releasePointerCapture() {}
 }
 
 const registry = new Map();
@@ -93,11 +108,17 @@ function installDom(ids) {
 // 从源码里自动提取该视图需要的 DOM id。
 // 手写清单会随源码改动而失配（我自己就漏了 capture-close 而白跑一轮），
 // 这里直接扫源码，保证垫片与实际需求永远一致。
-function idsUsedBy(relPath) {
-  const src = readFileSync(new URL(relPath, import.meta.url), 'utf8');
+//
+// 注意要扫**整条依赖链**：capture.js 现在会构造 crop.js，
+// 而 crop.js 也 getElementById 了一批 id。只扫 capture.js 的话，
+// 垫片里没有 crop-canvas，getContext 就会在 null 上被调用而整个视图构造失败。
+function idsUsedBy(...relPaths) {
   const ids = new Set();
-  for (const m of src.matchAll(/getElementById\(\s*['"]([^'"]+)['"]\s*\)/g)) {
-    ids.add(m[1]);
+  for (const relPath of relPaths) {
+    const src = readFileSync(new URL(relPath, import.meta.url), 'utf8');
+    for (const m of src.matchAll(/getElementById\(\s*['"]([^'"]+)['"]\s*\)/g)) {
+      ids.add(m[1]);
+    }
   }
   return [...ids];
 }
@@ -106,7 +127,7 @@ console.log('capture 视图的科目下拉：');
 
 const { createCapture } = await import('../web/js/views/capture.js');
 
-const CAPTURE_IDS = idsUsedBy('../web/js/views/capture.js');
+const CAPTURE_IDS = idsUsedBy('../web/js/views/capture.js', '../web/js/views/crop.js');
 
 function makeCapture() {
   installDom(CAPTURE_IDS);
